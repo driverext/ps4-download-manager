@@ -1,0 +1,45 @@
+name: Build PS4 PKG (phone friendly)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'scripts/**'
+      - 'Makefile.ps4'
+      - '.github/workflows/ps4-pkg.yml'
+permissions:
+  contents: read
+jobs:
+  pkg:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Fetch pinned JSON header and generate app icon
+        run: |
+          python3 scripts/fetch-deps.py
+          python3 scripts/generate_icon.py sce_sys/icon0.png
+      - name: Build native app and package with OpenOrbis
+        uses: OpenOrbis/toolchain-action@main
+        with:
+          version: v0.5.4
+          command: make -f Makefile.ps4
+      - name: Validate output
+        run: |
+          set -eu
+          test -s IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg
+          python3 scripts/check_pkg.py IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg --expected-id IV0000-BREW00001_00-PS4DOWNLOADMGR00 --sha256
+          sha256sum IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg > IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg.sha256
+      - name: Upload phone-downloadable PKG
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4DownloadManager-GoldHEN
+          path: |
+            IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg
+            IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg.sha256
+            eboot.bin
+          if-no-files-found: error
+          retention-days: 30
