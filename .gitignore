@@ -1,0 +1,6 @@
+build/
+*.part
+credentials.json
+settings.json
+queue.json
+include/nlohmann/json.hpp

@@ -1,0 +1,3 @@
+#include "dm/core.hpp"
+#include <iostream>
+int main(int argc,char** argv){try{if(argc<3){std::cout<<"Usage: ps4dm-cli STATE-DIRECTORY URL [URL...]\n";return 0;}dm::Settings cfg;cfg.directory=std::string(argv[1])+"/downloads";cfg.autoResume=true;dm::Engine engine(argv[1],cfg);for(int i=2;i<argc;i++)engine.add(argv[i]);for(;;){engine.tick();bool active=false,failed=false;for(auto& j:engine.snapshot()){active|=j.state=="queued"||j.state=="active";failed|=j.state=="error";}if(!active){for(auto& j:engine.snapshot())std::cout<<j.id<<" "<<j.state<<" "<<j.done<<" "<<j.error<<"\n";return failed?1:0;}dm::sleepMs(50);}}catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}}
