@@ -1,0 +1,80 @@
+# Native PS4 build. Requires the OpenOrbis PS4 Toolchain.
+# Run: make -f Makefile.ps4
+TOOLCHAIN := $(OO_PS4_TOOLCHAIN)
+TITLE := PS4 Download Manager
+VERSION := 01.00
+TITLE_ID := BREW00001
+CONTENT_ID := IV0000-$(TITLE_ID)_00-PS4DOWNLOADMGR00
+BUILD := build/ps4
+SOURCES_CPP := src/ui/ps4_main.cpp src/platform/graphics.cpp src/platform/ps4_http.cpp \
+ src/networking/http.cpp src/storage/storage.cpp src/downloads/engine.cpp src/realdebrid/debrid.cpp
+SOURCES_C := src/platform/ps4_abi.c
+OBJECTS := $(patsubst %.cpp,$(BUILD)/%.o,$(SOURCES_CPP)) $(patsubst %.c,$(BUILD)/%.o,$(SOURCES_C))
+CC := clang
+CXX := clang++
+LD := ld.lld
+PKGTOOL := $(TOOLCHAIN)/bin/linux/PkgTool.Core
+GP4TOOL := $(TOOLCHAIN)/bin/linux/create-gp4
+FSELFTOOL := $(TOOLCHAIN)/bin/linux/create-fself
+CFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -O2 -D_FILE_OFFSET_BITS=64 \
+ -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include -Iinclude -Isrc/platform
+CXXFLAGS := $(CFLAGS) -std=c++17 -isystem $(TOOLCHAIN)/include/c++/v1
+LIBS := -lScePad -lSceUserService -lSceVideoOut -lSceSysmodule \
+ -lSceNet -lSceHttp -lSceSsl -lSceLibcInternal -lc -lkernel -lc++
+LDFLAGS := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr \
+ -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
+
+.PHONY: all clean preflight
+all: $(CONTENT_ID).pkg
+
+preflight:
+	@test -n "$(TOOLCHAIN)" && test -f "$(TOOLCHAIN)/link.x" || (echo "Set OO_PS4_TOOLCHAIN to an installed OpenOrbis SDK"; exit 1)
+	@test -f include/nlohmann/json.hpp || (echo "Run python3 scripts/fetch-deps.py"; exit 1)
+	@test -x "$(PKGTOOL)" -a -x "$(GP4TOOL)" -a -x "$(FSELFTOOL)" || (echo "OpenOrbis Linux tools not found"; exit 1)
+
+$(BUILD)/%.o: %.cpp include/nlohmann/json.hpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+eboot.bin: $(OBJECTS)
+	$(LD) $(OBJECTS) -o $(BUILD)/ps4dm.elf $(LDFLAGS)
+	$(FSELFTOOL) -in=$(BUILD)/ps4dm.elf -out=$(BUILD)/ps4dm.oelf --eboot $@ --paid 0x3800000000000011
+	@test -s $@
+
+sce_sys/icon0.png: scripts/generate_icon.py
+	python3 scripts/generate_icon.py $@
+
+sce_sys/about/right.sprx:
+	@mkdir -p $(@D)
+	@file=$$(find "$(TOOLCHAIN)" -name right.sprx -type f -print -quit); \
+	test -n "$$file" || (echo "right.sprx not found in toolchain"; exit 1); \
+	cp "$$file" $@
+
+sce_sys/param.sfo: Makefile.ps4
+	@mkdir -p $(@D)
+	$(PKGTOOL) sfo_new $@
+	$(PKGTOOL) sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
+	$(PKGTOOL) sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value '$(VERSION)'
+	$(PKGTOOL) sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
+	$(PKGTOOL) sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value gd
+	$(PKGTOOL) sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
+	$(PKGTOOL) sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
+	$(PKGTOOL) sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
+	$(PKGTOOL) sfo_setentry $@ TITLE --type Utf8 --maxsize 128 --value '$(TITLE)'
+	$(PKGTOOL) sfo_setentry $@ TITLE_ID --type Utf8 --maxsize 12 --value '$(TITLE_ID)'
+	$(PKGTOOL) sfo_setentry $@ VERSION --type Utf8 --maxsize 8 --value '$(VERSION)'
+
+pkg.gp4: eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_sys/about/right.sprx
+	$(GP4TOOL) -out $@ --content-id=$(CONTENT_ID) --files "$^"
+
+$(CONTENT_ID).pkg: pkg.gp4
+	$(PKGTOOL) pkg_build $< .
+	@test -s $@
+	python3 scripts/check_pkg.py $@ --expected-id $(CONTENT_ID) --sha256
+
+clean:
+	rm -rf $(BUILD) eboot.bin pkg.gp4 sce_sys/param.sfo sce_sys/icon0.png sce_sys/about/right.sprx $(CONTENT_ID).pkg
