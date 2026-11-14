@@ -68,10 +68,18 @@ sce_sys/param.sfo: Makefile.ps4
 	$(PKGTOOL) sfo_setentry $@ TITLE_ID --type Utf8 --maxsize 12 --value '$(TITLE_ID)'
 	$(PKGTOOL) sfo_setentry $@ VERSION --type Utf8 --maxsize 8 --value '$(VERSION)'
 
-sce_module/%.prx:
-	@mkdir -p $(@D)
-	@test -f "$(TOOLCHAIN)/bin/data/modules/$*.prx" || (echo "Missing OpenOrbis stub module $*.prx"; exit 1)
-	cp "$(TOOLCHAIN)/bin/data/modules/$*.prx" $@
+# OpenOrbis compatible minimal module stubs. Rebuilt from public SDK sample sources.
+sce_module/libc.prx: src/platform/stubs/libc.c
+	@mkdir -p $(@D) $(BUILD)/stubs
+	$(CC) $(CFLAGS) -c $< -o $(BUILD)/stubs/libc.o
+	$(LD) $(BUILD)/stubs/libc.o -o $(BUILD)/stubs/libc.elf -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib -lSceLibcInternal -lkernel $(TOOLCHAIN)/lib/crtlib.o
+	$(FSELFTOOL) -in=$(BUILD)/stubs/libc.elf -out=$(BUILD)/stubs/libc.oelf --lib=$@ --paid 0x3800000000000011
+
+sce_module/libSceFios2.prx: src/platform/stubs/fios2.c
+	@mkdir -p $(@D) $(BUILD)/stubs
+	$(CC) $(CFLAGS) -c $< -o $(BUILD)/stubs/fios2.o
+	$(LD) $(BUILD)/stubs/fios2.o -o $(BUILD)/stubs/fios2.elf -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib -lSceLibcInternal -lkernel $(TOOLCHAIN)/lib/crtlib.o
+	$(FSELFTOOL) -in=$(BUILD)/stubs/fios2.elf -out=$(BUILD)/stubs/fios2.oelf --lib=$@ --paid 0x3800000000000011
 
 pkg.gp4: eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_sys/about/right.sprx sce_module/libc.prx sce_module/libSceFios2.prx
 	$(GP4TOOL) -out $@ --content-id=$(CONTENT_ID) --files "$^"
