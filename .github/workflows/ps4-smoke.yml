@@ -1,0 +1,44 @@
+name: PS4 isolated smoke build (not for automatic release)
+on:
+  workflow_dispatch:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tool dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make curl python3
+      - name: Download pinned OpenOrbis toolchain
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3             https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz             -o "$RUNNER_TEMP/openorbis.tar.gz"
+          mkdir -p "$RUNNER_TEMP/oo"
+          tar -xzf "$RUNNER_TEMP/openorbis.tar.gz" -C "$RUNNER_TEMP/oo"
+          sdk="$(dirname "$(find "$RUNNER_TEMP/oo" -name link.x -type f -print -quit)")"
+          test -f "$sdk/link.x"
+          echo "OO_PS4_TOOLCHAIN=$sdk" >> "$GITHUB_ENV"
+          chmod +x "$sdk"/bin/linux/* || true
+      - name: Fetch pinned JSON header
+        run: python3 scripts/fetch-deps.py
+      - name: Build isolated smoke application
+        run: |
+          make -f Makefile.ps4 SMOKE=1 preflight
+          make -f Makefile.ps4 SMOKE=1 -j2
+      - name: Validate smoke package
+        run: |
+          test -s IV0000-BREW00002_00-PS4DOWNLOADMGR00.pkg
+          python3 scripts/check_pkg.py IV0000-BREW00002_00-PS4DOWNLOADMGR00.pkg --expected-id IV0000-BREW00002_00-PS4DOWNLOADMGR00 --sha256
+      - name: Upload smoke diagnostic only, no release
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4-graphics-smoke-diagnostic-NOT-VERIFIED
+          path: |
+            IV0000-BREW00002_00-PS4DOWNLOADMGR00.pkg
+            eboot.bin
+          if-no-files-found: error
