@@ -1,0 +1,79 @@
+name: PS4 Consolidated Download Manager beta
+on:
+  pull_request:
+    paths:
+      - "src/ui/**"
+      - "src/platform/graphics.*"
+      - "Makefile.ps4"
+      - ".github/workflows/ps4-download-beta.yml"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ps4-download-beta.yml"
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make curl python3 libicu-dev
+      - name: Install pinned OpenOrbis toolchain
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz \
+            -o "$RUNNER_TEMP/openorbis.tar.gz"
+          mkdir -p "$RUNNER_TEMP/oo"
+          tar -xzf "$RUNNER_TEMP/openorbis.tar.gz" -C "$RUNNER_TEMP/oo"
+          sdk="$(dirname "$(find "$RUNNER_TEMP/oo" -name link.x -type f -print -quit)")"
+          test -n "$sdk" && test -f "$sdk/link.x"
+          echo "OO_PS4_TOOLCHAIN=$sdk" >> "$GITHUB_ENV"
+          chmod +x "$sdk"/bin/linux/* || true
+      - name: Fetch pinned dependency
+        run: python3 scripts/fetch-deps.py
+      - name: Build consolidated PS4 app with manually enabled persistent queue and networking
+        run: |
+          make -f Makefile.ps4 preflight
+          make -f Makefile.ps4 -j2 DM_UI_ONLY=1 DM_FS_READONLY=1 DM_FS_MKDIR=1 DM_BETA=1 \
+            SOURCES_CPP="src/ui/ps4_main.cpp src/platform/graphics.cpp src/platform/ps4_http.cpp src/networking/http.cpp src/storage/storage.cpp src/downloads/engine.cpp src/realdebrid/debrid.cpp" \
+            SOURCES_C="src/platform/ps4_abi.c" \
+            TITLE="PS4 DM Beta" \
+            TITLE_ID=BREW93576 \
+            CONTENT_ID=IV0000-BREW93576_00-PS4DMBETA0000001
+      - name: Validate output
+        run: |
+          set -euo pipefail
+          pkg="IV0000-BREW93576_00-PS4DMBETA0000001.pkg"
+          test -s "$pkg"
+          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93576_00-PS4DMBETA0000001 --sha256
+          sha256sum "$pkg" > "$pkg.sha256"
+      - name: Upload diagnostic build
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4-Download-Manager-Beta
+          path: |
+            IV0000-BREW93576_00-PS4DMBETA0000001.pkg
+            IV0000-BREW93576_00-PS4DMBETA0000001.pkg.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish offline UI-only PKG as direct-download prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "ps4-download-manager-beta-v0.2.0" \
+            IV0000-BREW93576_00-PS4DMBETA0000001.pkg \
+            IV0000-BREW93576_00-PS4DMBETA0000001.pkg.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "PS4 DM Beta v0.1.0 (manual storage-network-download beta)" \
+            --notes "Experimental beta of real PS4 Download Manager, not a smoke test. On startup no disk or networking is initialized. From Settings, enable Storage and queue, then HTTPS networking. Add direct HTTP(S) URLs from Add download. Optional Real-Debrid can be enabled later from Settings. Download limit 64 MiB per file, auto-resume disabled, single transfer and no automatic retries. Earlier full build caused console power-off and storage repair. Hardware compatibility is NOT yet verified: stop after any abnormal shutdown; do not use for important data." \
+            --prerelease
