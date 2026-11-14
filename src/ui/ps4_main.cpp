@@ -145,7 +145,7 @@ int main(){
 if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.value("interval",5));if(dm::now()>device.at("deadline").get<double>()){device=nullptr;message="Authorization expired";}else if(rd->poll(device)){device=nullptr;account=rd->account();message="Real-Debrid authorized";}}if(rd&&page==6&&!torrentId.empty()&&dm::now()>torrentAt){torrentAt=dm::now()+15;torrent=rd->torrent(torrentId);}}catch(const std::exception& e){message=e.what();}
  std::vector<std::string> rows,fileList;std::vector<dm::Job> shown;
  if(page==0){rows=pages;rows.erase(rows.begin());}else if(page==1)rows={"Enter URL or magnet","Resolver: "+std::string(useRD?"Real-Debrid":"Direct HTTP(S)"),"Package: "+group};
- else if(page>=2&&page<=4&&engine){for(auto& j:engine->snapshot())if(page==2||(page==3&&(j.state=="active"||j.state=="queued"))||(page==4&&j.state=="completed")){shown.push_back(j);rows.push_back(j.name+" | "+j.state+" | "+amount(j.done)+" / "+amount(j.total));}}
+ else if(page>=2&&page<=4&&engine){for(auto& j:engine->snapshot())if(page==2||(page==3&&(j.state=="active"||j.state=="queued"))||(page==4&&j.state=="completed")){shown.push_back(j);rows.push_back(j.name+" | "+j.state+" | "+amount(j.done)+" / "+amount(j.total)+(j.error.empty()?"":" | "+j.error));}}
  else if(page==5){rows={rd&&rd->loggedIn()?"Refresh account":"Authorize device","Logout and remove credentials","Load download history","Load supported hosts"};if(account.contains("username"))rows.push_back(account.value("username","")+" | "+account.value("type","")+" | premium seconds "+std::to_string(account.value("premium",0)));for(auto& h:history)rows.push_back(h.value("filename","History"));}
  else if(page==6){rows={"Refresh torrents","Add magnet","Enter torrent ID","Select file IDs (or all)","Download completed torrent links"};if(!torrentId.empty())rows.push_back("Current: "+torrentId+" "+torrent.value("status",""));if(torrent.contains("files"))for(auto& f:torrent["files"])rows.push_back(std::to_string(f.value("id",0))+" "+f.value("path",""));for(auto& t:torrents)rows.push_back(t.value("id","")+" "+t.value("status","")+" "+t.value("filename",""));}
  else if(page==7){
@@ -202,12 +202,14 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
   cfg.directory=root+"/downloads";
   cfg.concurrency=1;cfg.retries=0;cfg.autoResume=false;
   engine.reset(new dm::Engine(root,cfg));
+  if(net)engine->setTransport(net.get());
   message="STORAGE READY: persistent download queue enabled";
  }
  if(selected==11 && !net){
   message="STARTING NETWORK";
   net=dm::transport();
-  message="NETWORK READY: HTTPS transport initialized";
+  if(engine)engine->setTransport(net.get());
+  message="NETWORK READY: HTTPS transport shared with queue";
  }
  if(selected==12 && !rd){
   if(!net) throw std::runtime_error("Enable networking first");
@@ -247,7 +249,7 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,
 #ifdef DM_UI_ONLY
  #ifdef DM_BETA
- "BETA 0.3.1 | SAFE APPROVAL"
+ "BETA 0.3.2 | DOWNLOAD FIX"
 #else
  "STAGE FS MKDIR | NO NET"
 #endif
