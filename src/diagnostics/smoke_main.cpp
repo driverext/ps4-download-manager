@@ -20,18 +20,22 @@ int main() {
     if (pad < 0) return 5;
 
     const Color bg{11,18,32}, teal{64,210,208}, white{225,235,250};
-    for (int frame=0;frame<3600;++frame) {
+    bool crossHeld = false;
+    for (int frame=0;;++frame) {
         screen.FrameBufferFill(bg);
         screen.DrawRectangle(160,140,1600,120,teal);
         screen.DrawRectangle(160,350,1400,100,white);
-        screen.DrawRectangle(160,520,600,100,teal);
+        // X changes the lower bar rather than entering the unverified exit path.
+        screen.DrawRectangle(160,520,600,100,crossHeld ? white : teal);
         screen.SubmitFlip(frame);
         screen.FrameWait(frame);
         screen.FrameBufferSwap();
         OrbisPadData input{};
-        if (scePadReadState(pad,&input)>=0 &&
-            (input.buttons & ORBIS_PAD_BUTTON_CROSS)) break;
+        if (scePadReadState(pad,&input)>=0) {
+            crossHeld = (input.buttons & ORBIS_PAD_BUTTON_CROSS) != 0;
+        }
     }
-    scePadClose(pad);
-    return 0;
+    // Intentionally no scePadClose, Scene2D teardown or return from main:
+    // these operations are under investigation after CE-34878-0 on X.
+
 }
