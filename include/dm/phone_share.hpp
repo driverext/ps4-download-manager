@@ -31,3 +31,5 @@ private:
   std::thread worker;
   int listener=-1;
 };
+
+} // namespace dm
