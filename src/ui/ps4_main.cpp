@@ -6,20 +6,49 @@
 #include <sstream>
 #include <algorithm>
 #include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
 std::stringstream debugLogStream;
+static void bootLog(const char* stage) { FILE* fp = fopen("/data/ps4dm_boot.log", "a"); if (fp) { fprintf(fp, "%s\n",stage); fflush(fp); fclose(fp); } }
 namespace{
 Color bg{11,18,32},fg{225,235,250},accent{64,210,208},panel{23,40,62};
 void text(Scene2D& s,int x,int y,std::string value,Color color=fg){for(unsigned char c:value){if(x>1810)break;if(c<32||c>126)c='?';for(int row=0;row<30;row++)for(int col=0;col<16;col++)if(glyphs[c-32][row]&(1<<col))s.DrawPixel(x+col,y+row,color);x+=16;}}
 std::string amount(uint64_t n){std::ostringstream s;s.precision(1);s<<std::fixed<<double(n)/(1024*1024)<<" MiB";return s.str();}
 bool allowed(const std::string& p){return p.find("..") == std::string::npos&&(p.rfind("/data/PS4DownloadManager/",0)==0||p.rfind("/mnt/usb0/",0)==0||p.rfind("/mnt/usb1/",0)==0);}
 }
-int main(){Scene2D screen(1920,1080,4);if(!screen.Init(0xC000000,2))return 1;OrbisUserServiceInitializeParams params{};params.priority=ORBIS_KERNEL_PRIO_FIFO_LOWEST;sceUserServiceInitialize(&params);int user=-1;sceUserServiceGetInitialUser(&user);scePadInit();int pad=scePadOpen(user,0,0,nullptr);if(pad<0)return 2;
+int main(){
+ bootLog("START: main entered");
+ Scene2D screen(1920,1080,4);
+ bootLog("START: graphics object created");
+ if(!screen.Init(0xC000000,2)){bootLog("FAIL: graphics Init");return 1;}
+ bootLog("OK: graphics initialized");
+ OrbisUserServiceInitializeParams params{};
+ params.priority=ORBIS_KERNEL_PRIO_FIFO_LOWEST;
+ int userRc=sceUserServiceInitialize(&params);
+ if(userRc<0){bootLog("FAIL: user service initialization");return 3;}
+ bootLog("OK: user service initialized");
+ int user=-1;
+ int userGetRc=sceUserServiceGetInitialUser(&user);
+ if(userGetRc<0){bootLog("FAIL: get initial user");return 4;}
+ bootLog("OK: initial user acquired");
+ int padInitRc=scePadInit();
+ if(padInitRc<0){bootLog("FAIL: pad init");return 5;}
+ bootLog("OK: pad initialized");
+ int pad=scePadOpen(user,0,0,nullptr);
+ if(pad<0){bootLog("FAIL: pad open");return 2;}
+ bootLog("OK: pad opened");
  const std::string root="/data/PS4DownloadManager";dm::Settings cfg;cfg.directory=root+"/downloads";std::unique_ptr<dm::Engine> engine;std::unique_ptr<dm::Transport> net;std::unique_ptr<dm::Debrid> rd;std::string message;
- try{dm::mkdirs(root);auto c=dm::readJson(root+"/settings.json",dm::Json::object());cfg.concurrency=std::clamp(c.value("concurrency",2),1,4);cfg.retries=std::clamp(c.value("retries",3),0,6);cfg.timeout=std::clamp(c.value("timeout",30),5,120);cfg.autoResume=c.value("auto_resume",false);cfg.speedLimit=c.value("speed_limit",uint64_t(0));cfg.directory=c.value("directory",cfg.directory);if(!allowed(cfg.directory))throw std::runtime_error("Directory outside allowed roots");engine.reset(new dm::Engine(root,cfg));net=dm::transport();rd.reset(new dm::Debrid(*net,root));}catch(const std::exception& e){message=e.what();}
+ bootLog("START: persistent storage and network setup");
+ try{dm::mkdirs(root);bootLog("OK: storage directory");auto c=dm::readJson(root+"/settings.json",dm::Json::object());cfg.concurrency=std::clamp(c.value("concurrency",2),1,4);cfg.retries=std::clamp(c.value("retries",3),0,6);cfg.timeout=std::clamp(c.value("timeout",30),5,120);cfg.autoResume=c.value("auto_resume",false);cfg.speedLimit=c.value("speed_limit",uint64_t(0));cfg.directory=c.value("directory",cfg.directory);if(!allowed(cfg.directory))throw std::runtime_error("Directory outside allowed roots");engine.reset(new dm::Engine(root,cfg));bootLog("OK: download engine");
+ net=dm::transport();bootLog("OK: network transport");
+ rd.reset(new dm::Debrid(*net,root));bootLog("OK: Real-Debrid state");
+ }catch(const std::exception& e){message=e.what();bootLog("FAIL: caught startup exception");}
+ bootLog("OK: startup initialization finished");
  std::vector<std::string> pages={"Home","Add download","Queue","Active downloads","Completed downloads","Real-Debrid account","Torrents","Files","Settings","Error details"};int page=0,selected=0,frame=0,key=0;uint32_t previous=0;bool keyboard=false,useRD=false;std::string input,purpose,group="Default",file,torrentId;const std::string keys="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:/?&=.%_-+~#[]@!,$;()";
  dm::Json device,account=dm::Json::object(),history=dm::Json::array(),torrents=dm::Json::array(),torrent=dm::Json::object();double pollAt=0,torrentAt=0,spaceAt=0;uint64_t available=0;
  auto edit=[&](std::string what,std::string initial=""){purpose=what;input=initial;keyboard=true;key=0;};
  auto saveSettings=[&]{dm::atomicJson(root+"/settings.json",{{"directory",cfg.directory},{"concurrency",cfg.concurrency},{"retries",cfg.retries},{"timeout",cfg.timeout},{"speed_limit",cfg.speedLimit},{"auto_resume",cfg.autoResume}});message="Saved. Restart app to apply engine settings.";};
+ bootLog("START: UI loop");
  for(;;){OrbisPadData data{};if(scePadReadState(pad,&data)<0){data.buttons=0;data.leftStick.x=128;data.leftStick.y=128;}uint32_t buttons=data.buttons;if(data.leftStick.x<55)buttons|=ORBIS_PAD_BUTTON_LEFT;if(data.leftStick.x>200)buttons|=ORBIS_PAD_BUTTON_RIGHT;if(data.leftStick.y<55)buttons|=ORBIS_PAD_BUTTON_UP;if(data.leftStick.y>200)buttons|=ORBIS_PAD_BUTTON_DOWN;auto pressed=buttons&~previous;previous=buttons;
  try{if(engine)engine->tick();if(dm::now()>spaceAt){spaceAt=dm::now()+5;available=dm::freeSpace(cfg.directory);}if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.value("interval",5));if(dm::now()>device.at("deadline").get<double>()){device=nullptr;message="Authorization expired";}else if(rd->poll(device)){device=nullptr;account=rd->account();message="Real-Debrid authorized";}}if(rd&&page==6&&!torrentId.empty()&&dm::now()>torrentAt){torrentAt=dm::now()+15;torrent=rd->torrent(torrentId);}}catch(const std::exception& e){message=e.what();}
  std::vector<std::string> rows,fileList;std::vector<dm::Job> shown;
@@ -44,8 +73,10 @@ int main(){Scene2D screen(1920,1080,4);if(!screen.Init(0xC000000,2))return 1;Orb
  else if(page==7&&!fileList.empty()){file=fileList[selected];if(file.find(".part")!=std::string::npos)throw std::runtime_error("Partial files are managed by queue");edit("Rename",file);}
  else if(page==8){if(selected==0)cfg.concurrency=cfg.concurrency%4+1;if(selected==1)cfg.retries=(cfg.retries+1)%7;if(selected==2)cfg.timeout=cfg.timeout>=120?15:cfg.timeout+15;if(selected==3)cfg.autoResume=!cfg.autoResume;if(selected==4)cfg.speedLimit=cfg.speedLimit?0:1024*1024;if(selected==5)edit("Directory",cfg.directory);if(selected==6&&engine)engine->clearCompleted();if(selected==7)saveSettings();}
  }}}catch(const std::exception& e){message=e.what();}
+ if(frame==0)bootLog("START: first graphics frame");
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,"0.1.1 experimental | GoldHEN");text(screen,80,155,pages[page],accent);text(screen,1150,155,"Free: "+amount(available));
  if(keyboard){text(screen,80,215,purpose);text(screen,80,265,input.size()>100?input.substr(input.size()-100):input);for(int i=0;i<(int)keys.size()+4;i++){int x=80+(i%12)*140,y=350+(i/12)*65;if(i==key)screen.DrawRectangle(x-8,y-5,132,48,panel);text(screen,x,y,i<(int)keys.size()?std::string(1,keys[i]):i==(int)keys.size()?"BACKSPACE":i==(int)keys.size()+1?"CANCEL":i==(int)keys.size()+2?"NEWLINE":"DONE",i==key?accent:fg);}}
  else{int start=selected/12*12;for(int i=start;i<(int)rows.size()&&i<start+12;i++){int y=230+(i-start)*53;if(i==selected)screen.DrawRectangle(65,y-5,1790,48,panel);text(screen,85,y,rows[i],i==selected?accent:fg);}if(!device.is_null())text(screen,80,880,"Authorize: "+device.value("verification_url","")+" code "+device.value("user_code",""),accent);if(!shown.empty()){auto j=shown[std::min(selected,int(shown.size())-1)];if(j.total)screen.DrawRectangle(80,910,int(1720*std::min(1.0,double(j.done)/j.total)),10,accent);text(screen,80,930,amount(uint64_t(j.speed))+"/s | ETA "+(j.speed>0&&j.total>j.done?std::to_string(int((j.total-j.done)/j.speed))+"s":"unknown"));}}
- text(screen,80,995,keyboard?"D-pad: key   X: enter   Square: backspace   Circle: cancel":"X: select   Circle: home   Square: pause/resume   Triangle: cancel/delete   Options: settings");if(!message.empty()&&page!=9&&!keyboard)text(screen,80,960,message.substr(0,105));screen.SubmitFlip(frame);screen.FrameWait(frame++);screen.FrameBufferSwap();
+ text(screen,80,995,keyboard?"D-pad: key   X: enter   Square: backspace   Circle: cancel":"X: select   Circle: home   Square: pause/resume   Triangle: cancel/delete   Options: settings");if(!message.empty()&&page!=9&&!keyboard)text(screen,80,960,message.substr(0,105));screen.SubmitFlip(frame);if(frame==0)bootLog("OK: first flip submitted");
+ screen.FrameWait(frame++);if(frame==1)bootLog("OK: first flip completed");screen.FrameBufferSwap();
  }}
