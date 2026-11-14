@@ -8,6 +8,9 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#ifdef DM_PHONE_SHARE
+#include "dm/phone_share.hpp"
+#endif
 #ifdef DM_FS_READONLY
 #include <cstring>
 #include <sys/stat.h>
@@ -98,6 +101,9 @@ int main(){
  if(pad<0){bootLog("FAIL: pad open");return 2;}
  bootLog("OK: pad opened");
  const std::string root="/data/PS4DownloadManager";dm::Settings cfg;cfg.directory=root+"/downloads";std::unique_ptr<dm::Engine> engine;std::unique_ptr<dm::Transport> net;std::unique_ptr<dm::Debrid> rd;std::string message;
+#ifdef DM_PHONE_SHARE
+ std::unique_ptr<dm::PhoneShareServer> phoneShare;
+#endif
 #ifdef DM_UI_ONLY
  // Offline integration stage: deliberately do not create paths, instantiate the
  // download engine, or initialize HTTP / Real-Debrid.
@@ -161,6 +167,12 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
  rows.push_back(std::string("Storage and queue: ")+(engine?"READY":"ENABLE"));
  rows.push_back(std::string("HTTPS networking: ")+(net?"READY":"ENABLE"));
  rows.push_back(std::string("Real-Debrid: ")+(rd?"READY":"ENABLE"));
+#ifdef DM_PHONE_SHARE
+ rows.push_back(std::string("Phone sharing: ")+(phoneShare && phoneShare->running()?"192.168.1.150:8787":"ENABLE"));
+ const std::string incoming=phoneShare?phoneShare->pending():"";
+ rows.push_back(incoming.empty()?"Approve phone link: none":"Approve phone link: "+incoming.substr(0,65));
+ rows.push_back(incoming.empty()?"Reject phone link: none":"Reject phone link (press X)");
+#endif
 #endif
 }
  else if(page==9)for(size_t at=0;at<message.size();at+=100)rows.push_back(message.substr(at,100));selected=std::clamp(selected,0,std::max(0,int(rows.size())-1));
@@ -204,6 +216,28 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
   rd.reset(new dm::Debrid(*net,root));
   message="REAL-DEBRID READY: authorize in account menu";
  }
+#ifdef DM_PHONE_SHARE
+ if(selected==13 && !phoneShare){
+  if(!net) throw std::runtime_error("Enable HTTPS networking first");
+  auto incoming=std::unique_ptr<dm::PhoneShareServer>(new dm::PhoneShareServer);
+  incoming->start("192.168.1.150",8787);
+  phoneShare=std::move(incoming);
+  message="PHONE READY: http://192.168.1.150:8787";
+ }
+ if(selected==14){
+  if(!phoneShare || !engine || !net)throw std::runtime_error("Enable storage, network and phone sharing first");
+  const auto link=phoneShare->pending();
+  if(link.empty())throw std::runtime_error("No phone link is awaiting approval");
+  if(dm::Url::parse(link).scheme!="https")throw std::runtime_error("Phone links must use HTTPS");
+  dm::DirectResolver resolver(*net);
+  const auto resolved=resolver.resolve(link);
+  engine->add(resolved.url,resolved.name,"From iPhone");
+  phoneShare->takePending();
+  message="PHONE LINK ACCEPTED: added to queue";
+  page=2;selected=0;
+ }
+ if(selected==15 && phoneShare){phoneShare->rejectPending();message="PHONE LINK REJECTED";}
+#endif
 #endif
 }
  }}}catch(const std::exception& e){message=e.what();}
@@ -211,7 +245,7 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,
 #ifdef DM_UI_ONLY
  #ifdef DM_BETA
- "BETA | MANUAL STARTUP"
+ "BETA 0.3 | PHONE SHARING"
 #else
  "STAGE FS MKDIR | NO NET"
 #endif
