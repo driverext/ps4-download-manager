@@ -11,6 +11,7 @@
 #ifdef DM_FS_READONLY
 #include <cstring>
 #include <sys/stat.h>
+#include <cerrno>
 #endif
 std::stringstream debugLogStream;
 #ifdef DM_FS_READONLY
@@ -26,6 +27,40 @@ static std::string probeRootReadOnly() {
   uint16_t mode = 0;
   std::memcpy(&mode, bytes + 8, sizeof(mode));
   return S_ISDIR(mode) ? "FS PROBE OK: /data is a directory" : "FS PROBE FAIL: /data is not directory";
+}
+#endif
+
+#ifdef DM_FS_MKDIR
+// Explicit isolated test: create one fixed child of /data, never touch
+// existing Download Manager directories, and never delete user files.
+static std::string probeDirectoryCreate() {
+  static constexpr const char* path="/data/PS4DMStage3Probe";
+  alignas(16) unsigned char before[256]{};
+  const int check=sceKernelStat(path,reinterpret_cast<OrbisKernelStat*>(before));
+  if(check==0) {
+    uint16_t mode=0;
+    std::memcpy(&mode,before+8,sizeof(mode));
+    return S_ISDIR(mode) ? "MKDIR OK: test directory already exists" : "MKDIR FAIL: path exists, not a directory";
+  }
+  const uint32_t code=static_cast<uint32_t>(check);
+  if ((code & 0xffff0000u)!=0x80020000u || (code & 0xffffu)!=ENOENT) {
+    char out[90]; std::snprintf(out,sizeof(out),"MKDIR FAIL: initial stat rc=0x%08x",code);
+    return out;
+  }
+  const int made=sceKernelMkdir(path,0700);
+  if(made!=0) {
+    char out[90]; std::snprintf(out,sizeof(out),"MKDIR FAIL: mkdir rc=0x%08x",static_cast<unsigned>(made));
+    return out;
+  }
+  alignas(16) unsigned char after[256]{};
+  const int confirm=sceKernelStat(path,reinterpret_cast<OrbisKernelStat*>(after));
+  if(confirm!=0) {
+    char out[90]; std::snprintf(out,sizeof(out),"MKDIR FAIL: verify rc=0x%08x",static_cast<unsigned>(confirm));
+    return out;
+  }
+  uint16_t mode=0;
+  std::memcpy(&mode,after+8,sizeof(mode));
+  return S_ISDIR(mode) ? "MKDIR OK: created /data/PS4DMStage3Probe" : "MKDIR FAIL: verify not directory";
 }
 #endif
 
@@ -110,6 +145,9 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
 #ifdef DM_FS_READONLY
   rows.push_back("Probe /data (READ-ONLY; press X)");
 #endif
+#ifdef DM_FS_MKDIR
+  rows.push_back("Create isolated test directory (press X)");
+#endif
 }
  else if(page==9)for(size_t at=0;at<message.size();at+=100)rows.push_back(message.substr(at,100));selected=std::clamp(selected,0,std::max(0,int(rows.size())-1));
  try{if(keyboard){int count=keys.size()+4;if(pressed&ORBIS_PAD_BUTTON_LEFT)key=(key+count-1)%count;if(pressed&ORBIS_PAD_BUTTON_RIGHT)key=(key+1)%count;if(pressed&ORBIS_PAD_BUTTON_UP)key=(key+count-12)%count;if(pressed&ORBIS_PAD_BUTTON_DOWN)key=(key+12)%count;if(pressed&ORBIS_PAD_BUTTON_SQUARE&&!input.empty())input.pop_back();if(pressed&ORBIS_PAD_BUTTON_CIRCLE)keyboard=false;
@@ -128,12 +166,15 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
 #ifdef DM_FS_READONLY
  if(selected==8){ message="FS PROBE STARTING"; message=probeRootReadOnly(); }
 #endif
+#ifdef DM_FS_MKDIR
+ if(selected==9){ message="MKDIR STARTING"; message=probeDirectoryCreate(); }
+#endif
 }
  }}}catch(const std::exception& e){message=e.what();}
  if(frame==0)bootLog("START: first graphics frame");
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,
 #ifdef DM_UI_ONLY
- "STAGE FS READ-ONLY | NO NET"
+ "STAGE FS MKDIR | NO NET"
 #else
  "0.1.1 experimental | GoldHEN"
 #endif
