@@ -15,6 +15,7 @@ public:
   PhoneShareServer& operator=(const PhoneShareServer&) = delete;
   void start(const std::string& localIp="192.168.1.150", unsigned short port=8787);
   bool running() const { return ready.load(); }
+  bool stage(const std::string& url); // stores one incoming URL, never downloads
   std::string pending() const;
   std::string takePending();
   void rejectPending();
