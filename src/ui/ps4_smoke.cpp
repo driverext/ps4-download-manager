@@ -1,6 +1,8 @@
 // Minimal PS4 video smoke test. No filesystem, network, JSON, or download engine.
 // A separate title ID prevents replacing the full application during diagnosis.
 #include "../platform/graphics.h"
+#include <sstream>
+std::stringstream debugLogStream;
 #include <orbis/Pad.h>
 #include <orbis/UserService.h>
 #include <orbis/libkernel.h>
