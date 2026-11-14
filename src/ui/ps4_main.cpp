@@ -8,7 +8,27 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#ifdef DM_FS_READONLY
+#include <cstring>
+#include <sys/stat.h>
+#endif
 std::stringstream debugLogStream;
+#ifdef DM_FS_READONLY
+// Explicit opt-in read-only kernel stat probe. No writes, mkdir, or enumeration.
+static std::string probeRootReadOnly() {
+  alignas(16) unsigned char bytes[256]{};
+  int rc = sceKernelStat("/data", reinterpret_cast<OrbisKernelStat*>(bytes));
+  if (rc != 0) {
+    char message[64];
+    std::snprintf(message, sizeof(message), "FS PROBE FAIL: sceKernelStat rc=0x%08x", static_cast<unsigned>(rc));
+    return message;
+  }
+  uint16_t mode = 0;
+  std::memcpy(&mode, bytes + 8, sizeof(mode));
+  return S_ISDIR(mode) ? "FS PROBE OK: /data is a directory" : "FS PROBE FAIL: /data is not directory";
+}
+#endif
+
 #ifdef DM_UI_ONLY
 // Absolutely no disk access in this integration stage.
 static void bootLog(const char*) {}
@@ -85,7 +105,12 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
  try{fileList=dm::files(cfg.directory);rows=fileList;}catch(const std::exception& e){message=e.what();}
 #endif
 }
- else if(page==8)rows={"Concurrency: "+std::to_string(cfg.concurrency),"Retries: "+std::to_string(cfg.retries),"Timeout: "+std::to_string(cfg.timeout)+" sec","Auto resume: "+std::string(cfg.autoResume?"yes":"no"),"Speed limit: "+std::to_string(cfg.speedLimit)+" B/s","Directory: "+cfg.directory,"Clear completed history","Save settings"};
+ else if(page==8){
+  rows={"Concurrency: "+std::to_string(cfg.concurrency),"Retries: "+std::to_string(cfg.retries),"Timeout: "+std::to_string(cfg.timeout)+" sec","Auto resume: "+std::string(cfg.autoResume?"yes":"no"),"Speed limit: "+std::to_string(cfg.speedLimit)+" B/s","Directory: "+cfg.directory,"Clear completed history","Save settings"};
+#ifdef DM_FS_READONLY
+  rows.push_back("Probe /data (READ-ONLY; press X)");
+#endif
+}
  else if(page==9)for(size_t at=0;at<message.size();at+=100)rows.push_back(message.substr(at,100));selected=std::clamp(selected,0,std::max(0,int(rows.size())-1));
  try{if(keyboard){int count=keys.size()+4;if(pressed&ORBIS_PAD_BUTTON_LEFT)key=(key+count-1)%count;if(pressed&ORBIS_PAD_BUTTON_RIGHT)key=(key+1)%count;if(pressed&ORBIS_PAD_BUTTON_UP)key=(key+count-12)%count;if(pressed&ORBIS_PAD_BUTTON_DOWN)key=(key+12)%count;if(pressed&ORBIS_PAD_BUTTON_SQUARE&&!input.empty())input.pop_back();if(pressed&ORBIS_PAD_BUTTON_CIRCLE)keyboard=false;
  if(pressed&ORBIS_PAD_BUTTON_CROSS){if(key<(int)keys.size()){if(input.size()<8192)input+=keys[key];}else if(key==(int)keys.size()){if(!input.empty())input.pop_back();}else if(key==(int)keys.size()+1)keyboard=false;else if(key==(int)keys.size()+2){if(input.size()<8192)input+='\n';}else{keyboard=false;
@@ -99,12 +124,16 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
  else if(page==5&&rd){if(selected==0){if(rd->loggedIn())account=rd->account();else{device=rd->begin();pollAt=device.at("next_poll");}}if(selected==1){rd->logout();account=dm::Json::object();device=nullptr;}if(selected==2)history=rd->history();if(selected==3){message=rd->hosts().dump();page=9;selected=0;}}
  else if(page==6&&rd){if(selected==0){torrents=rd->torrents();if(!torrentId.empty())torrent=rd->torrent(torrentId);}if(selected==1)edit("Magnet","magnet:?");if(selected==2)edit("Torrent ID",torrentId);if(selected==3)edit("File IDs","all");if(selected==4&&engine){torrent=rd->torrent(torrentId);if(torrent.value("status","")!="downloaded")throw std::runtime_error("Torrent not ready");for(auto& link:torrent.at("links")){auto r=rd->unrestrict(link);engine->add(r.url,r.name,torrent.value("filename","Torrent"));}}}
  else if(page==7&&!fileList.empty()){file=fileList[selected];if(file.find(".part")!=std::string::npos)throw std::runtime_error("Partial files are managed by queue");edit("Rename",file);}
- else if(page==8){if(selected==0)cfg.concurrency=cfg.concurrency%4+1;if(selected==1)cfg.retries=(cfg.retries+1)%7;if(selected==2)cfg.timeout=cfg.timeout>=120?15:cfg.timeout+15;if(selected==3)cfg.autoResume=!cfg.autoResume;if(selected==4)cfg.speedLimit=cfg.speedLimit?0:1024*1024;if(selected==5)edit("Directory",cfg.directory);if(selected==6&&engine)engine->clearCompleted();if(selected==7)saveSettings();}
+ else if(page==8){if(selected==0)cfg.concurrency=cfg.concurrency%4+1;if(selected==1)cfg.retries=(cfg.retries+1)%7;if(selected==2)cfg.timeout=cfg.timeout>=120?15:cfg.timeout+15;if(selected==3)cfg.autoResume=!cfg.autoResume;if(selected==4)cfg.speedLimit=cfg.speedLimit?0:1024*1024;if(selected==5)edit("Directory",cfg.directory);if(selected==6&&engine)engine->clearCompleted();if(selected==7)saveSettings();
+#ifdef DM_FS_READONLY
+ if(selected==8){ message="FS PROBE STARTING"; message=probeRootReadOnly(); }
+#endif
+}
  }}}catch(const std::exception& e){message=e.what();}
  if(frame==0)bootLog("START: first graphics frame");
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,
 #ifdef DM_UI_ONLY
- "UI TEST | NO DISK / NETWORK"
+ "STAGE FS READ-ONLY | NO NET"
 #else
  "0.1.1 experimental | GoldHEN"
 #endif
