@@ -38,7 +38,7 @@ jobs:
           chmod +x "$sdk"/bin/linux/* || true
       - name: Fetch pinned dependency
         run: python3 scripts/fetch-deps.py
-      - name: Build isolated startup-only PKG
+      - name: Build isolated read-only filesystem diagnostic PKG
         run: |
           make -f Makefile.ps4 preflight
           make -f Makefile.ps4 -j2 \
