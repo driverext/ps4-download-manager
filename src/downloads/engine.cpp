@@ -7,6 +7,8 @@
 namespace dm {
 Engine::Engine(std::string r,Settings c):root(r),cfg(c){if(c.concurrency<1||c.concurrency>4||c.retries<0||c.retries>6||c.timeout<1||c.timeout>120)throw std::runtime_error("Invalid engine settings");mkdirs(root);mkdirs(cfg.directory);jobs=readJson(root+"/queue.json",Json::array()).get<std::vector<Job>>();for(auto& j:jobs){Url::parse(j.url);number(j.id);if(j.name!=safeName(j.name))throw std::runtime_error("Unsafe queue filename");if(j.state=="active"||j.state=="queued")j.state=cfg.autoResume?"queued":"paused";}save();}
 Engine::~Engine(){for(auto& w:workers)w.second->stop=true;for(auto& w:workers)if(w.second->thread.joinable())w.second->thread.join();}
+void Engine::setTransport(Transport* t){std::lock_guard<std::mutex> l(mutex);sharedTransport=t;}
+
 void Engine::save(){atomicJson(root+"/queue.json",jobs);}
 void Engine::update(const Job& x){std::lock_guard<std::mutex> lock(mutex);for(auto& j:jobs)if(j.id==x.id){auto state=j.state;j=x;if((state=="paused"||state=="cancelled")&&x.state!="completed")j.state=state;return;}}
 std::vector<Job> Engine::snapshot()const{std::lock_guard<std::mutex> lock(mutex);return jobs;}
@@ -16,12 +18,27 @@ void Engine::pause(const std::string& id){std::lock_guard<std::mutex> l(mutex);i
 void Engine::resume(const std::string& id){std::lock_guard<std::mutex> l(mutex);if(workers.count(id))return;for(auto& j:jobs)if(j.id==id&&(j.state=="paused"||j.state=="error"))j.state="queued";save();}
 void Engine::cancel(const std::string& id){pause(id);std::lock_guard<std::mutex> l(mutex);for(auto& j:jobs)if(j.id==id&&j.state!="completed")j.state="cancelled";save();}
 void Engine::clearCompleted(){std::lock_guard<std::mutex> l(mutex);jobs.erase(std::remove_if(jobs.begin(),jobs.end(),[](const Job& j){return j.state=="completed";}),jobs.end());save();}
-void Engine::run(std::string id,Worker* worker){Job j;for(auto& x:snapshot())if(x.id==id)j=x;auto path=cfg.directory+"/"+j.id+"-"+j.name,part=path+".part",meta=part+".json";auto net=transport();
- for(int attempt=0;attempt<=cfg.retries&&!worker->stop;attempt++){int fd=-1;try{
+void Engine::run(std::string id,Worker* worker){Job j;for(auto& x:snapshot())if(x.id==id)j=x;auto path=cfg.directory+"/"+j.id+"-"+j.name,part=path+".part",meta=part+".json";
+ // Reuse the already-initialized PS4 HTTP context. Creating another
+ // sceNetPool/sceSsl/sceHttp set inside each download worker is unverified.
+ Transport* net=sharedTransport;
+#ifdef DM_BETA
+ if(!net)throw std::runtime_error("Enable HTTPS networking before resuming");
+#else
+ auto owned=net?std::unique_ptr<Transport>():transport();
+ if(!net)net=owned.get();
+#endif
+
+ for(int attempt=0;attempt<=cfg.retries&&!worker->stop;attempt++){int fd=-1;std::string stage="preflight";try{
+ auto checkpoint=[&](const char* name){stage=name;j.error=std::string("Phase: ")+name;update(j);};
+ checkpoint("check destination");
+
  if(exists(path)){auto ready=readJson(meta,Json::object());if(ready.value("complete",false)&&ready.value("url","")==j.url&&ready.value("size",uint64_t(0))==fileSize(path)){j.state="completed";j.done=j.total=fileSize(path);update(j);return;}throw std::runtime_error("Destination already exists; inspect file");}
+ checkpoint("read partial metadata");
  auto m=readJson(meta,Json::object());uint64_t offset=fileSize(part);std::string etag=m.value("etag","");if(m.value("url","")!=j.url||etag.empty()||etag.rfind("W/",0)==0)offset=0;
  Request r;r.url=j.url;r.timeout=cfg.timeout;r.headers["Accept-Encoding"]="identity";if(offset){r.headers["Range"]="bytes="+std::to_string(offset)+"-";r.headers["If-Range"]=etag;}
  j.done=offset;j.total=0;j.speed=0;j.error="";double start=now(),last=start;uint64_t initial=offset,expected=0,received=0;bool known=false;
+ checkpoint("HTTPS request");
  fetch(*net,r,[&](const Response& h){
  if(h.status!=200&&h.status!=206)throw std::runtime_error("Download HTTP "+std::to_string(h.status));
  if(h.headers.count("content-type")&&lower(h.headers.at("content-type")).find("text/html")!=std::string::npos)throw std::runtime_error("Server returned HTML");
@@ -38,16 +55,18 @@ void Engine::run(std::string id,Worker* worker){Job j;for(auto& x:snapshot())if(
  if(known&&freeSpace(cfg.directory)<expected)throw std::runtime_error("Insufficient free space");
 #endif
  j.etag=h.headers.count("etag")?h.headers.at("etag"):"";
- atomicJson(meta,{{"url",j.url},{"etag",j.etag}});fd=open(part.c_str(),O_WRONLY|O_CREAT|O_NOFOLLOW|(offset?0:O_TRUNC),0600);if(fd<0)throw std::runtime_error("Cannot open partial file");if(lseek(fd,(off_t)offset,SEEK_SET)<0)throw std::runtime_error("Partial-file seek failed");
+ checkpoint("write metadata");
+ atomicJson(meta,{{"url",j.url},{"etag",j.etag}});checkpoint("open destination");fd=open(part.c_str(),O_WRONLY|O_CREAT|O_NOFOLLOW|(offset?0:O_TRUNC),0600);if(fd<0)throw std::runtime_error("Cannot open partial file");if(lseek(fd,(off_t)offset,SEEK_SET)<0)throw std::runtime_error("Partial-file seek failed");
  },[&](const char* p,size_t n){if(worker->stop)throw std::runtime_error("Stopped");if(known&&(received>expected||n>expected-received))throw std::runtime_error("Body exceeds declared length");
 #ifdef DM_BETA
  if(j.done > 64ULL*1024*1024 || n > 64ULL*1024*1024-j.done)
   throw std::runtime_error("Beta max download: 64 MiB");
 #endif
  size_t wrote=0;while(wrote<n){auto rc=write(fd,p+wrote,n-wrote);if(rc<=0)throw std::runtime_error("Disk write failed or disk full");wrote+=rc;}received+=n;j.done+=n;j.speed=(j.done-initial)/std::max(0.001,now()-start);if(now()-last>0.2){update(j);last=now();}if(cfg.speedLimit)while(!worker->stop&&now()-start<double(j.done-initial)/cfg.speedLimit)sleepMs(20);},worker->stop);
- if(known&&received!=expected)throw std::runtime_error("Truncated response");if(worker->stop)throw std::runtime_error("Stopped");if(fd<0)throw std::runtime_error("No response headers");if(fsync(fd))throw std::runtime_error("Disk flush failed");close(fd);fd=-1;
+ if(known&&received!=expected)throw std::runtime_error("Truncated response");if(worker->stop)throw std::runtime_error("Stopped");if(fd<0)throw std::runtime_error("No response headers");checkpoint("sync destination");if(fsync(fd))throw std::runtime_error("Disk flush failed");close(fd);fd=-1;
+ checkpoint("finish metadata");
  atomicJson(meta,{{"url",j.url},{"etag",j.etag},{"complete",true},{"size",j.done}});if(exists(path)||rename(part.c_str(),path.c_str()))throw std::runtime_error("Completion rename failed");j.state="completed";j.total=j.done;j.speed=0;update(j);{std::lock_guard<std::mutex> l(mutex);save();}unlink(meta.c_str());return;
- }catch(const std::exception& e){if(fd>=0){fsync(fd);close(fd);}j.error=e.what();if(worker->stop)break;if(attempt==cfg.retries){j.state="error";j.speed=0;update(j);return;}for(int i=0;i<(1<<std::min(attempt,6))*10&&!worker->stop;i++)sleepMs(100);}}
+ }catch(const std::exception& e){if(fd>=0){fsync(fd);close(fd);}j.error=stage+": "+e.what();if(worker->stop)break;if(attempt==cfg.retries){j.state="error";j.speed=0;update(j);return;}for(int i=0;i<(1<<std::min(attempt,6))*10&&!worker->stop;i++)sleepMs(100);}}
  std::lock_guard<std::mutex> l(mutex);for(auto& x:jobs)if(x.id==id){j.state=x.state=="cancelled"?"cancelled":"paused";j.speed=0;x=j;}
 }
 }
