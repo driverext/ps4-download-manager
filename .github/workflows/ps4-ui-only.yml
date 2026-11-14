@@ -1,0 +1,80 @@
+name: PS4 semi-complete offline UI build
+on:
+  pull_request:
+    paths:
+      - "src/ui/**"
+      - "src/platform/graphics.*"
+      - "Makefile.ps4"
+      - ".github/workflows/ps4-ui-only.yml"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ps4-ui-only.yml"
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make curl python3 libicu-dev
+      - name: Install pinned OpenOrbis toolchain
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz \
+            -o "$RUNNER_TEMP/openorbis.tar.gz"
+          mkdir -p "$RUNNER_TEMP/oo"
+          tar -xzf "$RUNNER_TEMP/openorbis.tar.gz" -C "$RUNNER_TEMP/oo"
+          sdk="$(dirname "$(find "$RUNNER_TEMP/oo" -name link.x -type f -print -quit)")"
+          test -n "$sdk" && test -f "$sdk/link.x"
+          echo "OO_PS4_TOOLCHAIN=$sdk" >> "$GITHUB_ENV"
+          chmod +x "$sdk"/bin/linux/* || true
+      - name: Fetch pinned dependency
+        run: python3 scripts/fetch-deps.py
+      - name: Build full UI with storage and networking initialization disabled
+        run: |
+          make -f Makefile.ps4 preflight
+          make -f Makefile.ps4 -j2 CFLAGS="$(make -f Makefile.ps4 -s --eval 'print-cflags:;@echo $(CFLAGS)' print-cflags) -DDM_UI_ONLY" \
+
+            SOURCES_CPP="src/ui/ps4_main.cpp src/platform/graphics.cpp src/platform/ps4_http.cpp src/networking/http.cpp src/storage/storage.cpp src/downloads/engine.cpp src/realdebrid/debrid.cpp" \
+            SOURCES_C="src/platform/ps4_abi.c" \
+            TITLE="PS4 Download Manager UI" \
+            TITLE_ID=BREW93573 \
+            CONTENT_ID=IV0000-BREW93573_00-PS4UIONLYSTAGE01
+      - name: Validate output
+        run: |
+          set -euo pipefail
+          pkg="IV0000-BREW93573_00-PS4UIONLYSTAGE01.pkg"
+          test -s "$pkg"
+          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93573_00-PS4UIONLYSTAGE01 --sha256
+          sha256sum "$pkg" > "$pkg.sha256"
+      - name: Upload diagnostic build
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4-Download-Manager-UI-Only
+          path: |
+            IV0000-BREW93573_00-PS4UIONLYSTAGE01.pkg
+            IV0000-BREW93573_00-PS4UIONLYSTAGE01.pkg.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish separate smoke test prerelease for direct phone download
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "ps4-download-manager-ui-only-v0.1.0" \
+            IV0000-BREW93573_00-PS4UIONLYSTAGE01.pkg \
+            IV0000-BREW93573_00-PS4UIONLYSTAGE01.pkg.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "PS4 Download Manager UI v0.1.0 (read-only filesystem diagnostic)" \
+            --notes "Semi-complete PS4 Download Manager interface diagnostic. Shows native menus, keyboard, controller navigation and in-memory settings. Filesystem reads/writes, downloads, network transport, storage engine, Real-Debrid and transfers are intentionally disabled. DOES NOT download files. No in-app exit due a previously observed teardown crash. Unverified on hardware. Earlier full build caused console power-off and storage repair; do not retest if instability occurs." \
+            --prerelease
