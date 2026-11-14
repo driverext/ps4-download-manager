@@ -1,0 +1,79 @@
+name: PS4 Stage 2 filesystem probe (read-only)
+on:
+  pull_request:
+    paths:
+      - "src/diagnostics/**"
+      - "src/platform/graphics.*"
+      - "Makefile.ps4"
+      - ".github/workflows/ps4-stage2.yml"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ps4-stage2.yml"
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make curl python3 libicu-dev
+      - name: Install pinned OpenOrbis toolchain
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz \
+            -o "$RUNNER_TEMP/openorbis.tar.gz"
+          mkdir -p "$RUNNER_TEMP/oo"
+          tar -xzf "$RUNNER_TEMP/openorbis.tar.gz" -C "$RUNNER_TEMP/oo"
+          sdk="$(dirname "$(find "$RUNNER_TEMP/oo" -name link.x -type f -print -quit)")"
+          test -n "$sdk" && test -f "$sdk/link.x"
+          echo "OO_PS4_TOOLCHAIN=$sdk" >> "$GITHUB_ENV"
+          chmod +x "$sdk"/bin/linux/* || true
+      - name: Fetch pinned dependency
+        run: python3 scripts/fetch-deps.py
+      - name: Build isolated startup-only PKG
+        run: |
+          make -f Makefile.ps4 preflight
+          make -f Makefile.ps4 -j2 \
+            SOURCES_CPP="src/diagnostics/fs_probe_main.cpp src/platform/graphics.cpp" \
+            SOURCES_C= \
+            TITLE="PS4 Stage 2 FS Probe" \
+            TITLE_ID=BREW93572 \
+            CONTENT_ID=IV0000-BREW93572_00-PS4FSSTAGE000001
+      - name: Validate output
+        run: |
+          set -euo pipefail
+          pkg="IV0000-BREW93572_00-PS4FSSTAGE000001.pkg"
+          test -s "$pkg"
+          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93572_00-PS4FSSTAGE000001 --sha256
+          sha256sum "$pkg" > "$pkg.sha256"
+      - name: Upload diagnostic build
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4-stage2-filesystem-readonly-diagnostic
+          path: |
+            IV0000-BREW93572_00-PS4FSSTAGE000001.pkg
+            IV0000-BREW93572_00-PS4FSSTAGE000001.pkg.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish separate smoke test prerelease for direct phone download
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "ps4-stage2-fs-probe-v0.1.0" \
+            IV0000-BREW93572_00-PS4FSSTAGE000001.pkg \
+            IV0000-BREW93572_00-PS4FSSTAGE000001.pkg.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "PS4 Stage 2 FS Probe v0.1.0 (read-only filesystem diagnostic)" \
+            --notes "Isolated startup-only diagnostic, NOT PS4 Download Manager. No storage writes, network operations, or Real-Debrid. Optional one-shot read-only stat of /data on SQUARE. Displays bars; X changes lower bar; SQUARE optionally performs one read-only sceKernelStat(/data) call with a padded ABI buffer. Yellow=not tested, green=success, red=failed. No app-initiated exit because earlier smoke test crashed in teardown. Unverified on hardware. The prior full app caused a complete console shutdown and storage repair. Confirm console stability before considering any hardware testing; do not repeatedly test after a shutdown." \
+            --prerelease
