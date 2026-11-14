@@ -69,11 +69,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "ps4-startup-smoke-v0.1.0" \
+          gh release create "ps4-startup-smoke-v0.1.1" \
             IV0000-BREW93571_00-PS4SMOKETEST0001.pkg \
             IV0000-BREW93571_00-PS4SMOKETEST0001.pkg.sha256 \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "PS4 Startup Smoke Test v0.1.0 (unverified diagnostic)" \
-            --notes "Isolated startup-only diagnostic, NOT PS4 Download Manager. No filesystem, networking or Real-Debrid operations. Displays colored rectangles and exits with X. Unverified on hardware. The prior full app caused a complete console shutdown and storage repair. Confirm console stability before considering any hardware testing; do not repeatedly test after a shutdown." \
+            --title "PS4 Startup Smoke Test v0.1.1 (controller-input diagnostic)" \
+            --notes "Isolated startup-only diagnostic, NOT PS4 Download Manager. No filesystem, networking or Real-Debrid operations. Displays colored rectangles; holding X makes lower bar white. No app-initiated exit because previous version crashed with CE-34878-0 during teardown. Unverified on hardware. The prior full app caused a complete console shutdown and storage repair. Confirm console stability before considering any hardware testing; do not repeatedly test after a shutdown." \
             --prerelease
