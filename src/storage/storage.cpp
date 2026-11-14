@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <cstdio>
 #include <cerrno>
+#include <cstring>
+#include <cstdint>
 #ifdef PS4
 #include <orbis/libkernel.h>
 #endif
@@ -23,66 +25,97 @@ static void fsTrace(const char* msg, const char* path = nullptr, int result = 0,
  fclose(f);
 }
 
+#ifdef PS4
+// The published OpenOrbis SDK headers may have an incompatible stat layout.
+// Never pass OrbisKernelStat as a stack object to the kernel ABI.
+// The PS4 kernel writes a 120-byte stat record (mode at 0x08, size at 0x48).
+// Allocate excess space and copy fields out of the raw record individually.
+// Layout provenance: orbis-ports/orbis-compat src/orbis_stat.cpp.
+struct KernelStatRaw {
+ alignas(16) unsigned char bytes[256]{};
+};
+static int kernelStat(const std::string& path, KernelStatRaw& raw) {
+ return sceKernelStat(path.c_str(), reinterpret_cast<OrbisKernelStat*>(raw.bytes));
+}
+static uint16_t kernelMode(const KernelStatRaw& raw) {
+ uint16_t value=0;
+ std::memcpy(&value, raw.bytes + 0x08, sizeof(value));
+ return value;
+}
+static int64_t kernelSize(const KernelStatRaw& raw) {
+ int64_t value=0;
+ std::memcpy(&value, raw.bytes + 0x48, sizeof(value));
+ return value;
+}
+#endif
+
 bool exists(const std::string& p) {
 #ifdef PS4
- OrbisKernelStat info{};
- return sceKernelStat(p.c_str(), &info) == 0;
+ KernelStatRaw info;
+ return kernelStat(p, info)==0;
 #else
  struct stat info{};
- return lstat(p.c_str(), &info) == 0;
+ return lstat(p.c_str(), &info)==0;
 #endif
 }
 uint64_t fileSize(const std::string& p) {
 #ifdef PS4
- OrbisKernelStat info{};
- if (sceKernelStat(p.c_str(), &info) != 0) {
-  if (!exists(p)) return 0;
+ KernelStatRaw info;
+ const int rc=kernelStat(p,info);
+ if (rc!=0) {
+  // sceKernelStat returns a kernel error code, not POSIX -1 / errno.
+  const uint32_t code=static_cast<uint32_t>(rc);
+  if ((code & 0xffff0000u)==0x80020000u && (code & 0xffffu)==ENOENT) return 0;
+  throw std::runtime_error("Cannot stat file");
+ }
+ if (!S_ISREG(kernelMode(info))) throw std::runtime_error("Not a regular file");
+ const int64_t n=kernelSize(info);
+ if(n<0) throw std::runtime_error("Invalid file size");
+ return static_cast<uint64_t>(n);
+#else
+ struct stat info{};
+ if (lstat(p.c_str(), &info)) {
+  if (errno==ENOENT) return 0;
   throw std::runtime_error("Cannot stat file");
  }
  if (!S_ISREG(info.st_mode)) throw std::runtime_error("Not a regular file");
  return static_cast<uint64_t>(info.st_size);
-#else
- struct stat info{};
- if (lstat(p.c_str(), &info)) {
-  if (errno == ENOENT) return 0;
-  throw std::runtime_error("Cannot stat file");
- }
- if (!S_ISREG(info.st_mode)) throw std::runtime_error("Not a regular file");
- return info.st_size;
 #endif
 }
 void mkdirs(const std::string& p) {
  fsTrace("mkdirs begin", p.c_str());
- if (p.empty() || p[0] != '/') throw std::runtime_error("Absolute directory path required");
- for (size_t i=1; i<=p.size(); ++i) {
-  if (i != p.size() && p[i] != '/') continue;
-  const std::string part = p.substr(0,i);
-  if (part.empty()) continue;
+ if (p.empty() || p[0]!='/') throw std::runtime_error("Absolute directory path required");
+ for (size_t i=1;i<=p.size();i++) {
+  if(i!=p.size() && p[i]!='/') continue;
+  const std::string part=p.substr(0,i);
+  if(part.empty()) continue;
 #ifdef PS4
-  // OpenOrbis v0.5.4 libc lstat/fstatat returns ENOSYS (78) on real PS4.
-  // Go directly through the kernel ABI, using its matching stat structure.
-  OrbisKernelStat info{};
+  KernelStatRaw info;
   fsTrace("before sceKernelStat",part.c_str());
-  int rc=sceKernelStat(part.c_str(), &info);
-  fsTrace("after sceKernelStat",part.c_str(),rc,errno);
-  if (rc==0) {
-   if (!S_ISDIR(info.st_mode)) throw std::runtime_error("Unsafe non-directory path");
+  int rc=kernelStat(part,info);
+  fsTrace("after sceKernelStat",part.c_str(),rc);
+  if(rc==0) {
+   if(!S_ISDIR(kernelMode(info))) throw std::runtime_error("Not a directory");
   } else {
+   const uint32_t code=static_cast<uint32_t>(rc);
+   // Only create paths confirmed missing. Never call mkdir for an arbitrary
+   // failure such as access denied, invalid pointer, or unsupported syscall.
+   if ((code & 0xffff0000u)!=0x80020000u || (code & 0xffffu)!=ENOENT)
+    throw std::runtime_error("Cannot inspect directory");
    fsTrace("before sceKernelMkdir",part.c_str());
    int mk=sceKernelMkdir(part.c_str(),0700);
-   fsTrace("after sceKernelMkdir",part.c_str(),mk,errno);
-   // Another process may have created it after our first check.
-   OrbisKernelStat check{};
-   int checkRc=sceKernelStat(part.c_str(), &check);
-   fsTrace("after mkdir stat check",part.c_str(),checkRc,errno);
-   if (checkRc!=0 || !S_ISDIR(check.st_mode)) throw std::runtime_error("Cannot create directory");
+   fsTrace("after sceKernelMkdir",part.c_str(),mk);
+   KernelStatRaw check;
+   const int again=kernelStat(part,check);
+   fsTrace("after mkdir stat check",part.c_str(),again);
+   if(again!=0 || !S_ISDIR(kernelMode(check))) throw std::runtime_error("Cannot create directory");
   }
 #else
   struct stat info{};
-  if (lstat(part.c_str(),&info)==0) {
-   if (!S_ISDIR(info.st_mode)||S_ISLNK(info.st_mode)) throw std::runtime_error("Unsafe directory");
+  if(lstat(part.c_str(), &info)==0) {
+   if(!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode)) throw std::runtime_error("Unsafe directory");
   } else {
-   if (errno != ENOENT || mkdir(part.c_str(),0700)) throw std::runtime_error("Cannot create directory");
+   if(errno!=ENOENT || mkdir(part.c_str(),0700)) throw std::runtime_error("Cannot create directory");
   }
 #endif
  }
