@@ -11,10 +11,12 @@ namespace dm {
 static int check(int n){if(n<0)throw std::runtime_error("PS4 networking error "+std::to_string(n));return n;}
 class SceTransport:public Transport{
  int pool=-1,ssl=-1,http=-1;
+ std::mutex requestGate; // serialize requests against the shared PS4 HTTP context
  void cleanup(){if(http>=0)sceHttpTerm(http);if(ssl>=0)dmSslTerm(ssl);if(pool>=0)sceNetPoolDestroy(pool);}
 public:SceTransport(){static std::once_flag init;std::call_once(init,[]{check(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET));check(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_SSL));check(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_HTTP));check(sceNetInit());});try{pool=check(sceNetPoolCreate("PS4DM",512*1024,0));ssl=check(sceSslInit(512*1024));http=check(sceHttpInit(pool,ssl,1024*1024));}catch(...){cleanup();throw;}}
  ~SceTransport(){cleanup();}
  void perform(const Request& r,Head head,Body body,std::atomic<bool>& stop)override{
+ std::lock_guard<std::mutex> serial(requestGate);
  struct Handles{int t=-1,c=-1,r=-1;~Handles(){if(r>=0)sceHttpDeleteRequest(r);if(c>=0)sceHttpDeleteConnection(c);if(t>=0)sceHttpDeleteTemplate(t);}}h;
  h.t=check(sceHttpCreateTemplate(http,"PS4DownloadManager/0.1.1",ORBIS_HTTP_VERSION_1_1,1));
  // Verified flag values: server, hostname, dates, known CA, SNI. No bypass callback.
