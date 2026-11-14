@@ -11,6 +11,7 @@
 #ifdef DM_FS_READONLY
 #include <cstring>
 #include <sys/stat.h>
+#include <cerrno>
 #endif
 std::stringstream debugLogStream;
 #ifdef DM_FS_READONLY
