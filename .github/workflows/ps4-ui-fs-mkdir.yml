@@ -46,21 +46,21 @@ jobs:
             SOURCES_C="src/platform/ps4_abi.c" \
             TITLE="PS4 DM FS Mkdir" \
             TITLE_ID=BREW93575 \
-            CONTENT_ID=IV0000-BREW93575_00-PS4FSMKDIRSTAGE01
+            CONTENT_ID=IV0000-BREW93575_00-PS4FSMKDIRTEST01
       - name: Validate output
         run: |
           set -euo pipefail
-          pkg="IV0000-BREW93575_00-PS4FSMKDIRSTAGE01.pkg"
+          pkg="IV0000-BREW93575_00-PS4FSMKDIRTEST01.pkg"
           test -s "$pkg"
-          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93575_00-PS4FSMKDIRSTAGE01 --sha256
+          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93575_00-PS4FSMKDIRTEST01 --sha256
           sha256sum "$pkg" > "$pkg.sha256"
       - name: Upload diagnostic build
         uses: actions/upload-artifact@v4
         with:
           name: PS4-Download-Manager-FS-Mkdir
           path: |
-            IV0000-BREW93575_00-PS4FSMKDIRSTAGE01.pkg
-            IV0000-BREW93575_00-PS4FSMKDIRSTAGE01.pkg.sha256
+            IV0000-BREW93575_00-PS4FSMKDIRTEST01.pkg
+            IV0000-BREW93575_00-PS4FSMKDIRTEST01.pkg.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish offline UI-only PKG as direct-download prerelease
@@ -70,8 +70,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "ps4-download-manager-fs-mkdir-v0.1.0" \
-            IV0000-BREW93575_00-PS4FSMKDIRSTAGE01.pkg \
-            IV0000-BREW93575_00-PS4FSMKDIRSTAGE01.pkg.sha256 \
+            IV0000-BREW93575_00-PS4FSMKDIRTEST01.pkg \
+            IV0000-BREW93575_00-PS4FSMKDIRTEST01.pkg.sha256 \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "PS4 DM FS Mkdir v0.1.0 (opt-in filesystem diagnostic)" \
