@@ -27,6 +27,9 @@ endif
 ifeq ($(DM_FS_MKDIR),1)
 CFLAGS += -DDM_FS_MKDIR
 endif
+ifeq ($(DM_BETA),1)
+CFLAGS += -DDM_BETA
+endif
 CXXFLAGS := $(CFLAGS) -std=c++17 -isystem $(TOOLCHAIN)/include/c++/v1
 LIBS := -lScePad -lSceUserService -lSceVideoOut -lSceSysmodule \
  -lSceNet -lSceHttp -lSceSsl -lSceFios2 -lSceLibcInternal -lc -lkernel -lc++

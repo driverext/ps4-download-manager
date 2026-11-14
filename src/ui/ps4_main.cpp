@@ -101,7 +101,11 @@ int main(){
 #ifdef DM_UI_ONLY
  // Offline integration stage: deliberately do not create paths, instantiate the
  // download engine, or initialize HTTP / Real-Debrid.
+ #ifdef DM_BETA
+ message="BETA: use Settings to enable storage and network";
+#else
  message="OFFLINE UI TEST: downloads and filesystem are disabled";
+#endif
 #else
  bootLog("START: persistent storage and network setup");
  try{dm::mkdirs(root);bootLog("OK: storage directory");auto c=dm::readJson(root+"/settings.json",dm::Json::object());cfg.concurrency=std::clamp(c.value("concurrency",2),1,4);cfg.retries=std::clamp(c.value("retries",3),0,6);cfg.timeout=std::clamp(c.value("timeout",30),5,120);cfg.autoResume=c.value("auto_resume",false);cfg.speedLimit=c.value("speed_limit",uint64_t(0));cfg.directory=c.value("directory",cfg.directory);if(!allowed(cfg.directory))throw std::runtime_error("Directory outside allowed roots");engine.reset(new dm::Engine(root,cfg));bootLog("OK: download engine");
@@ -115,7 +119,12 @@ int main(){
  auto edit=[&](std::string what,std::string initial=""){purpose=what;input=initial;keyboard=true;key=0;};
  auto saveSettings=[&]{
 #ifdef DM_UI_ONLY
+ #ifdef DM_BETA
+ if(engine) {dm::atomicJson(root+"/settings.json",{{"directory",cfg.directory},{"concurrency",cfg.concurrency},{"retries",cfg.retries},{"timeout",cfg.timeout},{"speed_limit",cfg.speedLimit},{"auto_resume",cfg.autoResume}});message="Saved. Restart needed for engine changes.";}
+ else message="Enable storage before saving settings.";
+#else
  message="Settings changed in memory only. Offline UI test.";
+#endif
 #else
  dm::atomicJson(root+"/settings.json",{{"directory",cfg.directory},{"concurrency",cfg.concurrency},{"retries",cfg.retries},{"timeout",cfg.timeout},{"speed_limit",cfg.speedLimit},{"auto_resume",cfg.autoResume}});
  message="Saved. Restart app to apply engine settings.";
@@ -148,6 +157,11 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
 #ifdef DM_FS_MKDIR
   rows.push_back("Create isolated test directory (press X)");
 #endif
+#ifdef DM_BETA
+ rows.push_back(std::string("Storage and queue: ")+(engine?"READY":"ENABLE"));
+ rows.push_back(std::string("HTTPS networking: ")+(net?"READY":"ENABLE"));
+ rows.push_back(std::string("Real-Debrid: ")+(rd?"READY":"ENABLE"));
+#endif
 }
  else if(page==9)for(size_t at=0;at<message.size();at+=100)rows.push_back(message.substr(at,100));selected=std::clamp(selected,0,std::max(0,int(rows.size())-1));
  try{if(keyboard){int count=keys.size()+4;if(pressed&ORBIS_PAD_BUTTON_LEFT)key=(key+count-1)%count;if(pressed&ORBIS_PAD_BUTTON_RIGHT)key=(key+1)%count;if(pressed&ORBIS_PAD_BUTTON_UP)key=(key+count-12)%count;if(pressed&ORBIS_PAD_BUTTON_DOWN)key=(key+12)%count;if(pressed&ORBIS_PAD_BUTTON_SQUARE&&!input.empty())input.pop_back();if(pressed&ORBIS_PAD_BUTTON_CIRCLE)keyboard=false;
@@ -169,12 +183,38 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
 #ifdef DM_FS_MKDIR
  if(selected==9){ message="MKDIR STARTING"; message=probeDirectoryCreate(); }
 #endif
+#ifdef DM_BETA
+ if(selected==10 && !engine){
+  message="STARTING STORAGE";
+  dm::mkdirs(root);
+  cfg.directory=root+"/downloads";
+  cfg.concurrency=1;cfg.retries=0;cfg.autoResume=false;
+  engine.reset(new dm::Engine(root,cfg));
+  message="STORAGE READY: persistent download queue enabled";
+ }
+ if(selected==11 && !net){
+  message="STARTING NETWORK";
+  net=dm::transport();
+  message="NETWORK READY: HTTPS transport initialized";
+ }
+ if(selected==12 && !rd){
+  if(!net) throw std::runtime_error("Enable networking first");
+  if(!engine) throw std::runtime_error("Enable storage first");
+  message="STARTING REAL-DEBRID";
+  rd.reset(new dm::Debrid(*net,root));
+  message="REAL-DEBRID READY: authorize in account menu";
+ }
+#endif
 }
  }}}catch(const std::exception& e){message=e.what();}
  if(frame==0)bootLog("START: first graphics frame");
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,
 #ifdef DM_UI_ONLY
+ #ifdef DM_BETA
+ "BETA | MANUAL STARTUP"
+#else
  "STAGE FS MKDIR | NO NET"
+#endif
 #else
  "0.1.1 experimental | GoldHEN"
 #endif
