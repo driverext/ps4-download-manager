@@ -26,7 +26,7 @@ class Engine{
  std::string root;Settings cfg;mutable std::mutex mutex;std::vector<Job> jobs;
  struct Worker{std::thread thread;std::atomic<bool> stop{false},finished{false};};std::map<std::string,std::unique_ptr<Worker>> workers;
  void save();void update(const Job&);void run(std::string,Worker*);
-public:Engine(std::string,Settings);~Engine();std::string add(std::string,std::string="",std::string="Default");std::vector<Job> snapshot()const;void tick();void pause(const std::string&);void resume(const std::string&);void cancel(const std::string&);void clearCompleted();
+public:Engine(std::string,Settings);~Engine();std::string add(std::string,std::string="",std::string="Default",bool paused=false);std::vector<Job> snapshot()const;void tick();void pause(const std::string&);void resume(const std::string&);void cancel(const std::string&);void clearCompleted();
 };
 struct Resolved{std::string url,name;uint64_t size=0;};
 class ILinkResolver{public:virtual ~ILinkResolver()=default;virtual Resolved resolve(const std::string&)=0;};
