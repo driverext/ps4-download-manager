@@ -18,7 +18,7 @@ double now(){return std::chrono::duration<double>(std::chrono::steady_clock::now
 static void fsTrace(const char* msg, const char* path = nullptr, int result = 0, int error = 0) {
  FILE* f = fopen("/data/ps4dm_boot.log", "a");
  if (!f) return;
- fprintf(f, "FS: %s path=%s result=%d errno=%d\\n", msg, path ? path : "-", result, error);
+ fprintf(f, "FS: %s path=%s result=%d errno=%d\n", msg, path ? path : "-", result, error);
  fflush(f);
  fclose(f);
 }
