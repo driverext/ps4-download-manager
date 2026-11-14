@@ -11,7 +11,7 @@ on:
       - 'Makefile.ps4'
       - '.github/workflows/ps4-pkg.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   pkg:
     runs-on: ubuntu-22.04
@@ -58,3 +58,18 @@ jobs:
             eboot.bin
           if-no-files-found: error
           retention-days: 30
+      - name: Publish direct-download GitHub prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v0.1.1-ps4-build-${{ github.run_number }}"
+          gh release create "$tag" \
+            IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg \
+            IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "PS4 Download Manager 0.1.1 (experimental build ${{ github.run_number }})" \
+            --notes "Experimental PS4 GoldHEN package built with OpenOrbis. Native compilation and PKG header verification passed. Installation and runtime behavior on real hardware remain unverified. Download the .pkg asset directly on your phone, FTP it to /data/pkg/, then install using GoldHEN Package Installer." \
+            --prerelease
