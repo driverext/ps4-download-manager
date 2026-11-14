@@ -45,22 +45,22 @@ jobs:
             SOURCES_CPP="src/ui/ps4_main.cpp src/platform/phone_share.cpp src/platform/graphics.cpp src/platform/ps4_http.cpp src/networking/http.cpp src/storage/storage.cpp src/downloads/engine.cpp src/realdebrid/debrid.cpp" \
             SOURCES_C="src/platform/ps4_abi.c" \
             TITLE="PS4 DM Net Fix" \
-            TITLE_ID=BREW93579 \
-            CONTENT_ID=IV0000-BREW93579_00-PS4DMSHAREDNET01
+            TITLE_ID=BREW93580 \
+            CONTENT_ID=IV0000-BREW93580_00-PS4DMSHAREDNET02
       - name: Validate output
         run: |
           set -euo pipefail
-          pkg="IV0000-BREW93579_00-PS4DMSHAREDNET01.pkg"
+          pkg="IV0000-BREW93580_00-PS4DMSHAREDNET02.pkg"
           test -s "$pkg"
-          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93579_00-PS4DMSHAREDNET01 --sha256
+          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93580_00-PS4DMSHAREDNET02 --sha256
           sha256sum "$pkg" > "$pkg.sha256"
       - name: Upload diagnostic build
         uses: actions/upload-artifact@v4
         with:
           name: PS4-Download-Manager-PhoneShare
           path: |
-            IV0000-BREW93579_00-PS4DMSHAREDNET01.pkg
-            IV0000-BREW93579_00-PS4DMSHAREDNET01.pkg.sha256
+            IV0000-BREW93580_00-PS4DMSHAREDNET02.pkg
+            IV0000-BREW93580_00-PS4DMSHAREDNET02.pkg.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish offline UI-only PKG as direct-download prerelease
@@ -69,11 +69,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "ps4-download-manager-beta-v0.3.2" \
-            IV0000-BREW93579_00-PS4DMSHAREDNET01.pkg \
-            IV0000-BREW93579_00-PS4DMSHAREDNET01.pkg.sha256 \
+          gh release create "ps4-download-manager-beta-v0.3.3" \
+            IV0000-BREW93580_00-PS4DMSHAREDNET02.pkg \
+            IV0000-BREW93580_00-PS4DMSHAREDNET02.pkg.sha256 \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "PS4 Download Manager Beta v0.3.2 (manual initialization)" \
-            --notes "Experimental beta v0.3.2. Fix attempt for CE-34878-0 on Square resume: worker now reuses the already initialized PS4 HTTP/SSL transport, serializes requests, and updates queue rows with its latest transfer phase. Phone approval still adds a PAUSED job. To enable: Settings > Storage and queue > HTTPS networking > Phone sharing. iPhone page http://192.168.1.150:8787. Enabling actual downloads is NOT proven safe on console. Prior versions crashed and an earlier full build caused shutdown/storage repair. Stop if crashes recur; do not retry transfers or use important files." \
+            --title "PS4 Download Manager Beta v0.3.3 (manual initialization)" \
+            --notes "Experimental beta v0.3.3. Fix attempt for CE-34878-0 on Square resume: worker now reuses the already initialized PS4 HTTP/SSL transport, serializes requests, and updates queue rows with its latest transfer phase. Phone approval still adds a PAUSED job. To enable: Settings > Storage and queue > HTTPS networking > Phone sharing. iPhone page http://192.168.1.150:8787. Enabling actual downloads is NOT proven safe on console. Prior versions crashed and an earlier full build caused shutdown/storage repair. Stop if crashes recur; do not retry transfers or use important files." \
             --prerelease
