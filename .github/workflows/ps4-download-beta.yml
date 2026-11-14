@@ -74,6 +74,6 @@ jobs:
             IV0000-BREW93576_00-PS4DMBETA0000001.pkg.sha256 \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "PS4 DM Beta v0.1.0 (manual storage-network-download beta)" \
+            --title "PS4 Download Manager Beta v0.2.0 (manual initialization)" \
             --notes "Experimental beta of real PS4 Download Manager, not a smoke test. On startup no disk or networking is initialized. From Settings, enable Storage and queue, then HTTPS networking. Add direct HTTP(S) URLs from Add download. Optional Real-Debrid can be enabled later from Settings. Download limit 64 MiB per file, auto-resume disabled, single transfer and no automatic retries. Earlier full build caused console power-off and storage repair. Hardware compatibility is NOT yet verified: stop after any abnormal shutdown; do not use for important data." \
             --prerelease
