@@ -21,6 +21,9 @@ CFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -O2 -DPS4 -D_GN
 ifeq ($(DM_UI_ONLY),1)
 CFLAGS += -DDM_UI_ONLY
 endif
+ifeq ($(DM_FS_READONLY),1)
+CFLAGS += -DDM_FS_READONLY
+endif
 CXXFLAGS := $(CFLAGS) -std=c++17 -isystem $(TOOLCHAIN)/include/c++/v1
 LIBS := -lScePad -lSceUserService -lSceVideoOut -lSceSysmodule \
  -lSceNet -lSceHttp -lSceSsl -lSceFios2 -lSceLibcInternal -lc -lkernel -lc++
