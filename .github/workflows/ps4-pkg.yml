@@ -45,6 +45,7 @@ jobs:
       - name: Validate output before artifact upload
         run: |
           set -e
+          python3 -c 'from pathlib import Path; p=Path("sce_sys/icon0.png").read_bytes(); assert p[:8] == bytes.fromhex("89504e470d0a1a0a") and int.from_bytes(p[16:20],"big")==512 and int.from_bytes(p[20:24],"big")==512 and p[24:26]==bytes([8,2]), "PS4 icon must be opaque 512x512 24-bit RGB PNG"'
           test -s IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg
           python3 scripts/check_pkg.py IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg --expected-id IV0000-BREW00001_00-PS4DOWNLOADMGR00 --sha256
           sha256sum IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg > IV0000-BREW00001_00-PS4DOWNLOADMGR00.pkg.sha256
