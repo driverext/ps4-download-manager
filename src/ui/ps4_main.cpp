@@ -225,15 +225,17 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
   message="PHONE READY: http://192.168.1.150:8787";
  }
  if(selected==14){
-  if(!phoneShare || !engine || !net)throw std::runtime_error("Enable storage, network and phone sharing first");
+  if(!phoneShare || !engine)throw std::runtime_error("Enable storage and phone sharing first");
   const auto link=phoneShare->pending();
   if(link.empty())throw std::runtime_error("No phone link is awaiting approval");
   if(dm::Url::parse(link).scheme!="https")throw std::runtime_error("Phone links must use HTTPS");
-  dm::DirectResolver resolver(*net);
-  const auto resolved=resolver.resolve(link);
-  engine->add(resolved.url,resolved.name,"From iPhone");
+  // Do NOT call DirectResolver here: it performs a synchronous HTTPS HEAD
+  // request inside the render/input thread and v0.3.0 crashed at approval.
+  // Add without network I/O, initially paused to prevent engine::tick() from
+  // starting an HTTP worker on the next frame. User can resume with Square.
+  engine->add(link,"","From iPhone",true);
   phoneShare->takePending();
-  message="PHONE LINK ACCEPTED: added to queue";
+  message="PHONE LINK QUEUED PAUSED: Square to start download";
   page=2;selected=0;
  }
  if(selected==15 && phoneShare){phoneShare->rejectPending();message="PHONE LINK REJECTED";}
@@ -245,7 +247,7 @@ if(rd&&!device.is_null()&&dm::now()>pollAt){pollAt=dm::now()+std::max(5,device.v
  screen.FrameBufferFill(bg);screen.DrawRectangle(0,0,1920,125,panel);text(screen,80,45,"PS4 DOWNLOAD MANAGER",accent);text(screen,1050,45,
 #ifdef DM_UI_ONLY
  #ifdef DM_BETA
- "BETA 0.3 | PHONE SHARING"
+ "BETA 0.3.1 | SAFE APPROVAL"
 #else
  "STAGE FS MKDIR | NO NET"
 #endif
