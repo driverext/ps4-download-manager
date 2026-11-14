@@ -29,9 +29,20 @@ void Engine::run(std::string id,Worker* worker){Job j;for(auto& x:snapshot())if(
  if(h.status==200){offset=0;initial=0;j.done=0;}else{
  if(!h.headers.count("content-range"))throw std::runtime_error("Missing Content-Range");auto range=h.headers.at("content-range");auto dash=range.find('-'),slash=range.find('/');if(range.rfind("bytes ",0)!=0||dash==std::string::npos||slash==std::string::npos||dash>=slash)throw std::runtime_error("Invalid Content-Range");auto a=number(range.substr(6,dash-6)),b=number(range.substr(dash+1,slash-dash-1)),total=number(range.substr(slash+1));if(a!=offset||b<a||total<=b)throw std::runtime_error("Invalid range bounds");expected=b-a+1;known=true;j.total=total;if(offset&&h.headers.count("etag")&&h.headers.at("etag")!=etag)throw std::runtime_error("Entity changed during resume");}
  if(h.headers.count("content-length")){auto n=number(h.headers.at("content-length"));if(known&&n!=expected)throw std::runtime_error("Range length mismatch");known=true;expected=n;if(h.status==200)j.total=n;}
- if(known&&freeSpace(cfg.directory)<expected)throw std::runtime_error("Insufficient free space");j.etag=h.headers.count("etag")?h.headers.at("etag"):"";
+ #ifdef DM_BETA
+ // Bound early hardware tests to small files until storage capacity and
+ // write/flush compatibility have been verified on the target console.
+ if (known && (expected > 64ULL*1024*1024 || offset > 64ULL*1024*1024))
+  throw std::runtime_error("Beta max download: 64 MiB");
+#else
+ if(known&&freeSpace(cfg.directory)<expected)throw std::runtime_error("Insufficient free space");
+#endifj.etag=h.headers.count("etag")?h.headers.at("etag"):"";
  atomicJson(meta,{{"url",j.url},{"etag",j.etag}});fd=open(part.c_str(),O_WRONLY|O_CREAT|O_NOFOLLOW|(offset?0:O_TRUNC),0600);if(fd<0)throw std::runtime_error("Cannot open partial file");if(lseek(fd,(off_t)offset,SEEK_SET)<0)throw std::runtime_error("Partial-file seek failed");
- },[&](const char* p,size_t n){if(worker->stop)throw std::runtime_error("Stopped");if(known&&(received>expected||n>expected-received))throw std::runtime_error("Body exceeds declared length");size_t wrote=0;while(wrote<n){auto rc=write(fd,p+wrote,n-wrote);if(rc<=0)throw std::runtime_error("Disk write failed or disk full");wrote+=rc;}received+=n;j.done+=n;j.speed=(j.done-initial)/std::max(0.001,now()-start);if(now()-last>0.2){update(j);last=now();}if(cfg.speedLimit)while(!worker->stop&&now()-start<double(j.done-initial)/cfg.speedLimit)sleepMs(20);},worker->stop);
+ },[&](const char* p,size_t n){if(worker->stop)throw std::runtime_error("Stopped");if(known&&(received>expected||n>expected-received))throw std::runtime_error("Body exceeds declared length");
+#ifdef DM_BETA
+ if(j.done > 64ULL*1024*1024 || n > 64ULL*1024*1024-j.done)
+  throw std::runtime_error("Beta max download: 64 MiB");
+#endifsize_t wrote=0;while(wrote<n){auto rc=write(fd,p+wrote,n-wrote);if(rc<=0)throw std::runtime_error("Disk write failed or disk full");wrote+=rc;}received+=n;j.done+=n;j.speed=(j.done-initial)/std::max(0.001,now()-start);if(now()-last>0.2){update(j);last=now();}if(cfg.speedLimit)while(!worker->stop&&now()-start<double(j.done-initial)/cfg.speedLimit)sleepMs(20);},worker->stop);
  if(known&&received!=expected)throw std::runtime_error("Truncated response");if(worker->stop)throw std::runtime_error("Stopped");if(fd<0)throw std::runtime_error("No response headers");if(fsync(fd))throw std::runtime_error("Disk flush failed");close(fd);fd=-1;
  atomicJson(meta,{{"url",j.url},{"etag",j.etag},{"complete",true},{"size",j.done}});if(exists(path)||rename(part.c_str(),path.c_str()))throw std::runtime_error("Completion rename failed");j.state="completed";j.total=j.done;j.speed=0;update(j);{std::lock_guard<std::mutex> l(mutex);save();}unlink(meta.c_str());return;
  }catch(const std::exception& e){if(fd>=0){fsync(fd);close(fd);}j.error=e.what();if(worker->stop)break;if(attempt==cfg.retries){j.state="error";j.speed=0;update(j);return;}for(int i=0;i<(1<<std::min(attempt,6))*10&&!worker->stop;i++)sleepMs(100);}}
