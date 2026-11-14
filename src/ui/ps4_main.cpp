@@ -9,7 +9,12 @@
 #include <cstdio>
 #include <cstdlib>
 std::stringstream debugLogStream;
+#ifdef DM_UI_ONLY
+// Absolutely no disk access in this integration stage.
+static void bootLog(const char*) {}
+#else
 static void bootLog(const char* stage) { FILE* fp = fopen("/data/ps4dm_boot.log", "a"); if (fp) { fprintf(fp, "%s\n",stage); fflush(fp); fclose(fp); } }
+#endif
 namespace{
 Color bg{11,18,32},fg{225,235,250},accent{64,210,208},panel{23,40,62};
 void text(Scene2D& s,int x,int y,std::string value,Color color=fg){for(unsigned char c:value){if(x>1810)break;if(c<32||c>126)c='?';for(int row=0;row<30;row++)for(int col=0;col<16;col++)if(glyphs[c-32][row]&(1<<col))s.DrawPixel(x+col,y+row,color);x+=16;}}
