@@ -70,9 +70,8 @@ sce_sys/param.sfo: Makefile.ps4
 
 sce_module/%.prx:
 	@mkdir -p $(@D)
-	@file=$(find "$(TOOLCHAIN)" -path "*/modules/$*.prx" -type f -print -quit); \
-	test -n "$file" || (echo "Missing $*.prx in OpenOrbis modules"; exit 1); \
-	cp "$file" $@
+	@test -f "$(TOOLCHAIN)/bin/data/modules/$*.prx" || (echo "Missing OpenOrbis stub module $*.prx"; exit 1)
+	cp "$(TOOLCHAIN)/bin/data/modules/$*.prx" $@
 
 pkg.gp4: eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_sys/about/right.sprx sce_module/libc.prx sce_module/libSceFios2.prx
 	$(GP4TOOL) -out $@ --content-id=$(CONTENT_ID) --files "$^"
