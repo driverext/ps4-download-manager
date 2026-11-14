@@ -7,8 +7,12 @@ on:
       - "Makefile.ps4"
       - ".github/workflows/ps4-smoke.yml"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ps4-smoke.yml"
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -59,3 +63,17 @@ jobs:
             IV0000-BREW93571_00-PS4SMOKETEST0001.pkg.sha256
           if-no-files-found: error
           retention-days: 14
+      - name: Publish separate smoke test prerelease for direct phone download
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "ps4-startup-smoke-v0.1.0" \
+            IV0000-BREW93571_00-PS4SMOKETEST0001.pkg \
+            IV0000-BREW93571_00-PS4SMOKETEST0001.pkg.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "PS4 Startup Smoke Test v0.1.0 (unverified diagnostic)" \
+            --notes "Isolated startup-only diagnostic, NOT PS4 Download Manager. No filesystem, networking or Real-Debrid operations. Displays colored rectangles and exits with X. Unverified on hardware. The prior full app caused a complete console shutdown and storage repair. Confirm console stability before considering any hardware testing; do not repeatedly test after a shutdown." \
+            --prerelease
