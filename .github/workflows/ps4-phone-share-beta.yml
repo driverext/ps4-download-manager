@@ -1,0 +1,79 @@
+name: PS4 Download Manager phone share beta
+on:
+  pull_request:
+    paths:
+      - "src/ui/**"
+      - "src/platform/graphics.*"
+      - "Makefile.ps4"
+      - ".github/workflows/ps4-phone-share-beta.yml"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ps4-phone-share-beta.yml"
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make curl python3 libicu-dev
+      - name: Install pinned OpenOrbis toolchain
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz \
+            -o "$RUNNER_TEMP/openorbis.tar.gz"
+          mkdir -p "$RUNNER_TEMP/oo"
+          tar -xzf "$RUNNER_TEMP/openorbis.tar.gz" -C "$RUNNER_TEMP/oo"
+          sdk="$(dirname "$(find "$RUNNER_TEMP/oo" -name link.x -type f -print -quit)")"
+          test -n "$sdk" && test -f "$sdk/link.x"
+          echo "OO_PS4_TOOLCHAIN=$sdk" >> "$GITHUB_ENV"
+          chmod +x "$sdk"/bin/linux/* || true
+      - name: Fetch pinned dependency
+        run: python3 scripts/fetch-deps.py
+      - name: Build consolidated PS4 app with manually enabled persistent queue and networking
+        run: |
+          make -f Makefile.ps4 preflight
+          make -f Makefile.ps4 -j2 DM_UI_ONLY=1 DM_FS_READONLY=1 DM_FS_MKDIR=1 DM_BETA=1 DM_PHONE_SHARE=1 \
+            SOURCES_CPP="src/ui/ps4_main.cpp src/platform/phone_share.cpp src/platform/graphics.cpp src/platform/ps4_http.cpp src/networking/http.cpp src/storage/storage.cpp src/downloads/engine.cpp src/realdebrid/debrid.cpp" \
+            SOURCES_C="src/platform/ps4_abi.c" \
+            TITLE="PS4 DM Phone" \
+            TITLE_ID=BREW93577 \
+            CONTENT_ID=IV0000-BREW93577_00-PS4DMPHONE000001
+      - name: Validate output
+        run: |
+          set -euo pipefail
+          pkg="IV0000-BREW93577_00-PS4DMPHONE000001.pkg"
+          test -s "$pkg"
+          python3 scripts/check_pkg.py "$pkg" --expected-id IV0000-BREW93577_00-PS4DMPHONE000001 --sha256
+          sha256sum "$pkg" > "$pkg.sha256"
+      - name: Upload diagnostic build
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS4-Download-Manager-PhoneShare
+          path: |
+            IV0000-BREW93577_00-PS4DMPHONE000001.pkg
+            IV0000-BREW93577_00-PS4DMPHONE000001.pkg.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish offline UI-only PKG as direct-download prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "ps4-download-manager-beta-v0.3.0" \
+            IV0000-BREW93577_00-PS4DMPHONE000001.pkg \
+            IV0000-BREW93577_00-PS4DMPHONE000001.pkg.sha256 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "PS4 Download Manager Beta v0.3.0 (manual initialization)" \
+            --notes "PS4 Download Manager beta v0.3.0 with phone-to-PS4 link sharing. PS4 console IP 192.168.1.150. After enabling HTTPS networking, choose Settings > Phone sharing. On iPhone Safari open http://192.168.1.150:8787 and paste a URL. PS4 Settings > Approve phone link must be selected before queuing. Same Wi-Fi required. Never expose port 8787 to the public internet. Storage and downloads still require manual initialization and are unverified on hardware. Prior builds caused power-off and storage repair: stop if system becomes unstable." \
+            --prerelease
