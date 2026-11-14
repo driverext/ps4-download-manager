@@ -1,14 +1,21 @@
 # Native PS4 build. Requires the OpenOrbis PS4 Toolchain.
 # Run: make -f Makefile.ps4
 TOOLCHAIN := $(OO_PS4_TOOLCHAIN)
+SMOKE ?= 0
 TITLE := PS4 Download Manager
 VERSION := 01.00
 TITLE_ID := BREW00001
 CONTENT_ID := IV0000-$(TITLE_ID)_00-PS4DOWNLOADMGR00
-BUILD := build/ps4
+BUILD := build/ps4$(if $(filter 1,$(SMOKE)),-smoke,)
 SOURCES_CPP := src/ui/ps4_main.cpp src/platform/graphics.cpp src/platform/ps4_http.cpp \
  src/networking/http.cpp src/storage/storage.cpp src/downloads/engine.cpp src/realdebrid/debrid.cpp
 SOURCES_C := src/platform/ps4_abi.c
+ifeq ($(SMOKE),1)
+TITLE := PS4 Graphics Smoke Test
+TITLE_ID := BREW00002
+SOURCES_CPP := src/ui/ps4_smoke.cpp src/platform/graphics.cpp
+SOURCES_C :=
+endif
 OBJECTS := $(patsubst %.cpp,$(BUILD)/%.o,$(SOURCES_CPP)) $(patsubst %.c,$(BUILD)/%.o,$(SOURCES_C))
 CC := clang
 CXX := clang++
